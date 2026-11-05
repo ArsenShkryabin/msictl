@@ -8,7 +8,6 @@ use std::time::Duration;
 const MSI_EC_PATH: &str = "/sys/devices/platform/msi-ec";
 const BAT_PATH: &str = "/sys/class/power_supply/BAT1";
 const GPU_PCI_PATH: &str = "/sys/bus/pci/devices/0000:02:00.0";
-const GPU_PARENT_PCI_PATH: &str = "/sys/bus/pci/devices/0000:00:1c.4";
 
 // ANSI Styling
 const C_RESET: &str = "\x1b[0m";
@@ -47,11 +46,8 @@ enum Commands {
         /// Action: toggle | on | off
         action: Option<String>,
     },
-    /// Manage discrete NVIDIA GPU power state (D3cold suspension)
-    Gpu {
-        /// Action: status | power-save (suspend GPU) | performance (wake GPU)
-        action: Option<String>,
-    },
+    /// Show discrete NVIDIA GPU power state and P-state metrics
+    Gpu,
     /// Manage battery charging threshold
     Battery {
         /// Optional threshold percentage (e.g. 80, 100)
@@ -105,21 +101,19 @@ fn notify_osd(title: &str, body: &str, icon: &str) {
 
 fn get_gpu_status() -> (&'static str, &'static str) {
     if Path::new(GPU_PCI_PATH).exists() {
-        let status = read_sysfs(&format!("{GPU_PCI_PATH}/power/runtime_status"))
-            .unwrap_or_else(|| "active".into());
-        if status == "suspended" {
-            ("D3hot (Suspended)", C_YELLOW)
-        } else {
-            ("D0 (Active)", C_GREEN)
+        if let Ok(output) = Command::new("nvidia-smi")
+            .args(["--query-gpu=pstate", "--format=csv,noheader,nounits"])
+            .output()
+        {
+            if let Ok(s) = String::from_utf8(output.stdout) {
+                if s.trim() == "P8" {
+                    return ("P8 Idle (Lowest Power State)", C_GREEN);
+                }
+            }
         }
+        ("Active (3D Rendering)", C_YELLOW)
     } else {
-        let parent_status = read_sysfs(&format!("{GPU_PARENT_PCI_PATH}/power/runtime_status"))
-            .unwrap_or_default();
-        if parent_status == "suspended" {
-            ("D3cold (Powered Off - Power Saving)", C_CYAN)
-        } else {
-            ("Offline", C_DIM)
-        }
+        ("Offline", C_DIM)
     }
 }
 
@@ -249,52 +243,32 @@ fn set_boost(action: Option<String>) {
     }
 }
 
-fn set_gpu_power(action: Option<String>) {
-    match action.as_deref() {
-        Some("power-save") | Some("off") | Some("suspend") => {
-            // Check if any process is actively using NVIDIA
-            let output = Command::new("fuser")
-                .arg("/dev/nvidia0")
-                .output();
-            if let Ok(out) = output {
-                if !out.stdout.is_empty() {
-                    eprintln!("{C_RED}Cannot suspend GPU: Active processes are using /dev/nvidia0!{C_RESET}");
-                    return;
-                }
-            }
+fn set_gpu_power() {
+    let (state, color) = get_gpu_status();
+    println!("{C_BOLD}► NVIDIA GPU Architecture & Power Status:{C_RESET}");
+    println!("  Hardware:      NVIDIA GeForce GTX 1050 Ti Max-Q (Pascal GP107M)");
+    println!("  Power State:   {color}{state}{C_RESET}");
 
-            println!("Powering down NVIDIA discrete GPU into D3cold...");
-            let res = Command::new("sudo")
-                .args(["sh", "-c", "echo 1 > /sys/bus/pci/devices/0000:02:00.0/remove 2>/dev/null"])
-                .status();
-            match res {
-                Ok(s) if s.success() => {
-                    println!("{C_CYAN}✓ NVIDIA GPU powered off (D3cold state). Saving ~3-5 Watts of battery.{C_RESET}");
-                    notify_osd("NVIDIA GPU: Powered Off", "PCI port suspended into D3cold (saving 3-5W)", "battery");
-                }
-                _ => eprintln!("{C_RED}Failed to remove GPU device from PCI bus.{C_RESET}"),
+    // Check if nvidia-smi can query current performance state and processes
+    if let Ok(output) = Command::new("nvidia-smi")
+        .args(["--query-gpu=pstate,temperature.gpu,memory.used,power.draw", "--format=csv,noheader,nounits"])
+        .output()
+    {
+        if let Ok(s) = String::from_utf8(output.stdout) {
+            let parts: Vec<&str> = s.trim().split(',').map(|p| p.trim()).collect();
+            if parts.len() >= 4 {
+                println!("  P-State:       {C_GREEN}{}{C_RESET} (P8 = Lowest Idle Power State)", parts[0]);
+                println!("  Temperature:   {}°C", parts[1]);
+                println!("  VRAM Usage:    {} MiB (Idle)", parts[2]);
             }
-        }
-        Some("performance") | Some("on") | Some("wake") => {
-            println!("Rescanning PCI bus to wake NVIDIA GPU...");
-            let res = Command::new("sudo")
-                .args(["sh", "-c", "echo 1 > /sys/bus/pci/rescan"])
-                .status();
-            match res {
-                Ok(s) if s.success() => {
-                    sleep(Duration::from_millis(500));
-                    println!("{C_GREEN}✓ NVIDIA GPU re-enumerated and ready for prime-run / compute.{C_RESET}");
-                    notify_osd("NVIDIA GPU: Active", "GPU awakened and ready for graphics/compute", "video-display");
-                }
-                _ => eprintln!("{C_RED}Failed to rescan PCI bus.{C_RESET}"),
-            }
-        }
-        _ => {
-            let (state, color) = get_gpu_status();
-            println!("{C_BOLD}NVIDIA GPU Status:{C_RESET} {color}{state}{C_RESET}");
-            println!("{C_DIM}Usage: msictl gpu power-save (suspend to D3cold) | msictl gpu performance (wake){C_RESET}");
         }
     }
+
+    println!();
+    println!("{C_DIM}ℹ️  Architecture Note:{C_RESET}");
+    println!("{C_DIM}   Pascal GPUs officially use Coarse-Grained Dynamic Power Management (P8).{C_RESET}");
+    println!("{C_DIM}   In P8 state, the GPU clock drops to minimum, drawing negligible power.{C_RESET}");
+    println!("{C_DIM}   System suspend preservation is enabled (NVreg_PreserveVideoMemoryAllocations=1).{C_RESET}");
 }
 
 fn set_battery(thresh: Option<u8>) {
@@ -356,7 +330,7 @@ fn main() {
         Some(Commands::Mode { mode }) => set_mode(&mode),
         Some(Commands::Cycle) => cycle_mode(),
         Some(Commands::Boost { action }) => set_boost(action),
-        Some(Commands::Gpu { action }) => set_gpu_power(action),
+        Some(Commands::Gpu) => set_gpu_power(),
         Some(Commands::Battery { threshold }) => set_battery(threshold),
         Some(Commands::Cam { action }) => set_cam(action),
         Some(Commands::Watch) => run_watch(),

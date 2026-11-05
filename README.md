@@ -1,6 +1,6 @@
 # msictl — MSI Laptop Hardware & Power Controller
 
-> **Fast, lightweight, native Rust utility for MSI laptops under Linux (fan curves, performance profiles, Cooler Boost, discrete GPU D3cold power management, battery charge limits).**
+> **Fast, lightweight, native Rust utility for MSI laptops under Linux (fan curves, performance profiles, Cooler Boost, discrete GPU status, battery charge limits).**
 
 Designed and tested on **MSI PS63 Modern 8RD (MS-16S1)** and compatible MSI laptops featuring the `msi-ec` platform driver.
 
@@ -10,8 +10,8 @@ Designed and tested on **MSI PS63 Modern 8RD (MS-16S1)** and compatible MSI lapt
 
 - 🤫 **Performance & Fan Profiles:** Switch between `Silent` (quiet curves, Eco shift), `Balanced` (dynamic auto fans), and `Turbo` (high clocks).
 - ❄️ **Cooler Boost Support:** One-key toggle for 100% maximum dual-fan cooling.
-- 🔋 **Discrete GPU D3cold Suspension:** Safely removes unused NVIDIA dGPU from PCIe bus to force parent bridge into D3cold, saving **3–5 Watts** of continuous power on battery.
 - 📊 **Real-time Telemetry:** Direct EC readout of CPU/GPU fan speeds (%), temperatures, battery charge, and hardware limits.
+- 🔋 **Safe GPU Power Tracking:** Tracks NVIDIA GeForce GTX 1050 Ti Max-Q performance state (`P8` low power idle) without unstable bus hacks.
 - 🖥️ **Desktop OSD & Hyprland Hotkeys:** Instant desktop notifications via `notify-send` on mode switch.
 - ⚡ **Zero-Sudo Udev Integration:** Direct sysfs access for group `wheel` without entering root passwords.
 
@@ -62,10 +62,9 @@ msictl boost on
 msictl boost off
 ```
 
-### GPU Power Saving (D3cold):
+### GPU Power Status:
 ```bash
-msictl gpu power-save   # Suspend NVIDIA dGPU into D3cold (0W draw)
-msictl gpu performance  # Wake NVIDIA dGPU for gaming / compute
+msictl gpu              # Query NVIDIA dGPU power and P-State
 ```
 
 ### Battery Charge Limit:
