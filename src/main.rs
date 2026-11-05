@@ -179,27 +179,44 @@ fn show_status() {
     println!();
 }
 
+fn set_cpu_tuning(no_turbo: bool, epp: &str) {
+    let _ = write_sysfs("/sys/devices/system/cpu/intel_pstate/no_turbo", if no_turbo { "1" } else { "0" });
+    if let Ok(entries) = fs::read_dir("/sys/devices/system/cpu") {
+        for entry in entries.flatten() {
+            let path = entry.path().join("cpufreq/energy_performance_preference");
+            if path.exists() {
+                if let Some(p_str) = path.to_str() {
+                    let _ = write_sysfs(p_str, epp);
+                }
+            }
+        }
+    }
+}
+
 fn set_mode(mode: &str) {
     match mode.to_lowercase().as_str() {
         "silent" | "quiet" | "eco" => {
             let _ = write_sysfs(&format!("{MSI_EC_PATH}/cooler_boost"), "off");
             let _ = write_sysfs(&format!("{MSI_EC_PATH}/fan_mode"), "silent");
             let _ = write_sysfs(&format!("{MSI_EC_PATH}/shift_mode"), "eco");
-            println!("{C_GREEN}✓ Switched to SILENT mode (Eco profile, quiet fan curves).{C_RESET}");
-            notify_osd("MSI Profile: Silent", "Eco power profile, quiet fan curves activated", "weather-clear-night");
+            set_cpu_tuning(true, "power");
+            println!("{C_GREEN}✓ Switched to SILENT mode (Eco profile, quiet fan curves, Turbo Boost disabled, EPP power).{C_RESET}");
+            notify_osd("MSI Profile: Silent", "Eco profile + Quiet fans + Max battery life", "weather-clear-night");
         }
         "balanced" | "comfort" | "auto" => {
             let _ = write_sysfs(&format!("{MSI_EC_PATH}/cooler_boost"), "off");
             let _ = write_sysfs(&format!("{MSI_EC_PATH}/fan_mode"), "auto");
             let _ = write_sysfs(&format!("{MSI_EC_PATH}/shift_mode"), "comfort");
-            println!("{C_BLUE}✓ Switched to BALANCED mode (Comfort profile, auto fan control).{C_RESET}");
-            notify_osd("MSI Profile: Balanced", "Comfort profile, dynamic fan control activated", "preferences-system");
+            set_cpu_tuning(false, "balance_power");
+            println!("{C_BLUE}✓ Switched to BALANCED mode (Comfort profile, auto fan control, dynamic clocks).{C_RESET}");
+            notify_osd("MSI Profile: Balanced", "Comfort profile + Dynamic fan control", "preferences-system");
         }
         "turbo" | "performance" | "max" => {
             let _ = write_sysfs(&format!("{MSI_EC_PATH}/cooler_boost"), "off");
             let _ = write_sysfs(&format!("{MSI_EC_PATH}/fan_mode"), "advanced");
             let _ = write_sysfs(&format!("{MSI_EC_PATH}/shift_mode"), "turbo");
-            println!("{C_MAGENTA}✓ Switched to TURBO mode (Turbo profile, maximum sustained clocks).{C_RESET}");
+            set_cpu_tuning(false, "performance");
+            println!("{C_MAGENTA}✓ Switched to TURBO mode (Turbo profile, maximum sustained clocks, EPP performance).{C_RESET}");
             notify_osd("MSI Profile: Turbo", "Maximum performance profile activated", "system-run");
         }
         other => {
