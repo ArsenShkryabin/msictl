@@ -1,0 +1,9 @@
+[package]
+name = "msictl"
+version = "0.1.0"
+edition = "2021"
+description = "Hardware control & power management utility for MSI laptops (fan curves, performance profiles, GPU D3cold, battery thresholds)"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
