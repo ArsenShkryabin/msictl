@@ -11,7 +11,8 @@ Designed and tested on **MSI PS63 Modern 8RD (MS-16S1)** and compatible MSI lapt
 - 🤫 **Performance & Fan Profiles:** Switch between `Silent` (quiet curves, Eco shift), `Balanced` (dynamic auto fans), and `Turbo` (high clocks).
 - ❄️ **Cooler Boost Support:** One-key toggle for 100% maximum dual-fan cooling.
 - 📊 **Real-time Telemetry:** Direct EC readout of CPU/GPU fan speeds (%), temperatures, battery charge, and hardware limits.
-- 🔋 **Safe GPU Power Tracking:** Tracks NVIDIA GeForce GTX 1050 Ti Max-Q performance state (`P8` low power idle) without unstable bus hacks.
+- 🔍 **Dynamic Hardware Auto-Discovery:** Automatically detects NVIDIA GPU PCI address (via vendor ID `0x10de` and VGA/3D class) and primary ACPI battery (BAT0, BAT1, etc.) without hardcoding bus paths.
+- 🔋 **Safe GPU Power Tracking:** Tracks NVIDIA discrete GPU performance state (`P8` low power idle) without unstable bus hacks.
 - 🖥️ **Desktop OSD & Hyprland Hotkeys:** Instant desktop notifications via `notify-send` on mode switch.
 - ⚡ **Zero-Sudo Udev Integration:** Direct sysfs access for group `wheel` without entering root passwords.
 
@@ -26,13 +27,12 @@ sudo install -m 755 target/release/msictl /usr/local/bin/msictl
 ```
 
 ### 2. Configure Udev (Run without sudo)
+A ready-to-use udev rule file is provided in `assets/70-msi-ec.rules`:
 ```bash
-sudo bash -c 'cat << "EOF" > /etc/udev/rules.d/70-msi-ec.rules
-ACTION=="add|change", SUBSYSTEM=="platform", KERNEL=="msi-ec", RUN+="/usr/bin/chmod -R g+w /sys/devices/platform/msi-ec", RUN+="/usr/bin/chgrp -R wheel /sys/devices/platform/msi-ec"
-EOF
-udevadm control --reload && udevadm trigger -s platform -p /devices/platform/msi-ec
-chmod -R g+w /sys/devices/platform/msi-ec && chgrp -R wheel /sys/devices/platform/msi-ec'
+sudo cp assets/70-msi-ec.rules /etc/udev/rules.d/70-msi-ec.rules
+sudo udevadm control --reload && sudo udevadm trigger
 ```
+Ensure your user belongs to the `wheel` group.
 
 ---
 

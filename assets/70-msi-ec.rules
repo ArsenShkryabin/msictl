@@ -1,0 +1,11 @@
+# udev rules for MSI laptops using msi-ec driver and battery charge thresholds
+# Allows users in group 'wheel' to control fan modes, Cooler Boost, and battery thresholds without sudo.
+
+# MSI Embedded Controller (msi-ec)
+ACTION=="add|change", SUBSYSTEM=="platform", KERNEL=="msi-ec", RUN+="/usr/bin/chmod -R g+w /sys/devices/platform/msi-ec", RUN+="/usr/bin/chgrp -R wheel /sys/devices/platform/msi-ec"
+
+# Battery charge control threshold
+ACTION=="add|change", SUBSYSTEM=="power_supply", ATTR{type}=="Battery", RUN+="/usr/bin/chmod g+w /sys%p/charge_control_end_threshold", RUN+="/usr/bin/chgrp wheel /sys%p/charge_control_end_threshold"
+
+# CPU energy performance preference & turbo toggle
+ACTION=="add|change", SUBSYSTEM=="cpu", RUN+="/usr/bin/chmod -R g+w /sys/devices/system/cpu/intel_pstate /sys/devices/system/cpu/cpu*/cpufreq", RUN+="/usr/bin/chgrp -R wheel /sys/devices/system/cpu/intel_pstate /sys/devices/system/cpu/cpu*/cpufreq"

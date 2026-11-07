@@ -1,13 +1,8 @@
 use clap::{Parser, Subcommand};
-use std::fs;
-use std::path::Path;
+use msictl::{HardwareController, ProfileMode, SystemTelemetry};
 use std::process::Command;
 use std::thread::sleep;
 use std::time::Duration;
-
-const MSI_EC_PATH: &str = "/sys/devices/platform/msi-ec";
-const BAT_PATH: &str = "/sys/class/power_supply/BAT1";
-const GPU_PCI_PATH: &str = "/sys/bus/pci/devices/0000:02:00.0";
 
 // ANSI Styling
 const C_RESET: &str = "\x1b[0m";
@@ -23,7 +18,7 @@ const C_DIM: &str = "\x1b[2m";
 #[derive(Parser)]
 #[command(name = "msictl")]
 #[command(author = "Arsen Shkryabin")]
-#[command(version = "0.1.0")]
+#[command(version = "0.2.0")]
 #[command(about = "MSI Laptop Hardware & Power Controller (Fan curves, Cooler Boost, GPU D3cold, Profiles)", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -34,9 +29,9 @@ struct Cli {
 enum Commands {
     /// Show comprehensive system status (fans, temps, battery, GPU, profile)
     Status,
-    /// Set performance and fan profile (silent, balanced, turbo, eco)
+    /// Set performance and fan profile (silent, balanced, turbo)
     Mode {
-        /// Target mode: silent | balanced | turbo | eco
+        /// Target mode: silent | balanced | turbo
         mode: String,
     },
     /// Cycle through modes: silent -> balanced -> turbo -> silent (ideal for hotkeys)
@@ -50,7 +45,7 @@ enum Commands {
     Gpu,
     /// Manage battery charging threshold
     Battery {
-        /// Optional threshold percentage (e.g. 80, 100)
+        /// Optional threshold percentage (e.g. 60, 80, 100)
         threshold: Option<u8>,
     },
     /// Toggle hardware webcam killswitch via EC
@@ -60,31 +55,8 @@ enum Commands {
     },
     /// Live real-time terminal monitoring dashboard
     Watch,
-}
-
-fn read_sysfs(path: &str) -> Option<String> {
-    fs::read_to_string(path).ok().map(|s| s.trim().to_string())
-}
-
-fn write_sysfs(path: &str, value: &str) -> Result<(), String> {
-    if !Path::new(path).exists() {
-        return Err(format!("File does not exist: {path}"));
-    }
-    match fs::write(path, value) {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            // Attempt via sudo fallback if permission denied
-            let status = Command::new("sudo")
-                .args(["sh", "-c", &format!("echo '{}' > '{}'", value, path)])
-                .status()
-                .map_err(|se| format!("Failed to run sudo: {se}"))?;
-            if status.success() {
-                Ok(())
-            } else {
-                Err(format!("Permission denied writing to {path} ({e})"))
-            }
-        }
-    }
+    /// Launch graphical user interface
+    Gui,
 }
 
 fn notify_osd(title: &str, body: &str, icon: &str) {
@@ -99,241 +71,162 @@ fn notify_osd(title: &str, body: &str, icon: &str) {
         .spawn();
 }
 
-fn get_gpu_status() -> (&'static str, &'static str) {
-    if Path::new(GPU_PCI_PATH).exists() {
-        if let Ok(output) = Command::new("nvidia-smi")
-            .args(["--query-gpu=pstate", "--format=csv,noheader,nounits"])
-            .output()
-        {
-            if let Ok(s) = String::from_utf8(output.stdout) {
-                if s.trim() == "P8" {
-                    return ("P8 Idle (Lowest Power State)", C_GREEN);
-                }
-            }
-        }
-        ("Active (3D Rendering)", C_YELLOW)
-    } else {
-        ("Offline", C_DIM)
-    }
-}
-
-fn show_status() {
-    let fw = read_sysfs(&format!("{MSI_EC_PATH}/fw_version")).unwrap_or_else(|| "N/A".into());
-    let fan_mode = read_sysfs(&format!("{MSI_EC_PATH}/fan_mode")).unwrap_or_else(|| "auto".into());
-    let shift_mode = read_sysfs(&format!("{MSI_EC_PATH}/shift_mode")).unwrap_or_else(|| "auto".into());
-    let cooler_boost = read_sysfs(&format!("{MSI_EC_PATH}/cooler_boost")).unwrap_or_else(|| "off".into());
-
-    let cpu_temp: i32 = read_sysfs(&format!("{MSI_EC_PATH}/cpu/realtime_temperature"))
-        .and_then(|s| s.parse().ok()).unwrap_or(0);
-    let cpu_fan: i32 = read_sysfs(&format!("{MSI_EC_PATH}/cpu/realtime_fan_speed"))
-        .and_then(|s| s.parse().ok()).unwrap_or(0);
-
-    let gpu_temp: i32 = read_sysfs(&format!("{MSI_EC_PATH}/gpu/realtime_temperature"))
-        .and_then(|s| s.parse().ok()).unwrap_or(0);
-    let gpu_fan: i32 = read_sysfs(&format!("{MSI_EC_PATH}/gpu/realtime_fan_speed"))
-        .and_then(|s| s.parse().ok()).unwrap_or(0);
-
-    let bat_cap = read_sysfs(&format!("{BAT_PATH}/capacity")).unwrap_or_else(|| "?".into());
-    let bat_stat = read_sysfs(&format!("{BAT_PATH}/status")).unwrap_or_else(|| "?".into());
-    let bat_thresh = read_sysfs(&format!("{BAT_PATH}/charge_control_end_threshold")).unwrap_or_else(|| "100".into());
-
-    let (gpu_state, gpu_color) = get_gpu_status();
-
+fn print_status(telemetry: &SystemTelemetry, hw: &HardwareController) {
     println!();
     println!("{C_BOLD}{C_CYAN}╔══════════════════════════════════════════════════════════════════╗{C_RESET}");
     println!("{C_BOLD}{C_CYAN}║                    MSI Laptop Control (msictl)                   ║{C_RESET}");
     println!("{C_BOLD}{C_CYAN}╚══════════════════════════════════════════════════════════════════╝{C_RESET}");
-    println!("{C_DIM} EC Firmware: {fw} | MSI MS-16S1 Platform{C_RESET}\n");
+    println!("{C_DIM} EC Firmware: {} | Battery: {}{C_RESET}\n",
+        telemetry.fw_version,
+        hw.get_battery_path().map(|p| p.display().to_string()).unwrap_or_else(|| "Not found".into())
+    );
 
     // Profile Box
     println!("{C_BOLD}► Performance & Cooling Profile:{C_RESET}");
-    let mode_str = match (fan_mode.as_str(), shift_mode.as_str(), cooler_boost.as_str()) {
-        (_, _, "on") => format!("{C_RED}❄️ Cooler Boost (100% Fan Force){C_RESET}"),
-        ("silent", _, _) => format!("{C_GREEN}🤫 Silent Mode (Eco Shift + Quiet Fans){C_RESET}"),
-        ("advanced", "turbo", _) | (_, "turbo", _) => format!("{C_MAGENTA}🚀 Turbo Mode (Max Performance){C_RESET}"),
-        _ => format!("{C_BLUE}⚖️ Balanced Mode (Comfort Shift + Auto Fans){C_RESET}"),
+    let mode_str = if telemetry.cooler_boost {
+        format!("{C_RED}❄️ Cooler Boost (100% Fan Force){C_RESET}")
+    } else if telemetry.fan_mode == "silent" || telemetry.shift_mode == "eco" {
+        format!("{C_GREEN}🤫 Silent Mode (Eco Shift + Quiet Fans){C_RESET}")
+    } else if telemetry.shift_mode == "turbo" || telemetry.fan_mode == "advanced" {
+        format!("{C_MAGENTA}🚀 Turbo Mode (Max Performance){C_RESET}")
+    } else {
+        format!("{C_BLUE}⚖️ Balanced Mode (Comfort Shift + Auto Fans){C_RESET}")
     };
+
     println!("  Active Mode:   {mode_str}");
-    println!("  Fan Mode:      {C_BOLD}{fan_mode}{C_RESET} | Shift Mode: {C_BOLD}{shift_mode}{C_RESET}");
+    println!("  Fan Mode:      {C_BOLD}{}{C_RESET} | Shift Mode: {C_BOLD}{}{C_RESET}", telemetry.fan_mode, telemetry.shift_mode);
     println!();
 
     // CPU Telemetry
-    let cpu_color = if cpu_temp > 75 { C_RED } else if cpu_temp > 60 { C_YELLOW } else { C_GREEN };
+    let cpu_color = if telemetry.cpu_temp > 75 { C_RED } else if telemetry.cpu_temp > 60 { C_YELLOW } else { C_GREEN };
     println!("{C_BOLD}► CPU Metrics:{C_RESET}");
-    println!("  Temperature:   {cpu_color}{cpu_temp}°C{C_RESET}");
-    println!("  Fan Speed:     {C_BOLD}{cpu_fan}%{C_RESET}");
+    println!("  Temperature:   {cpu_color}{}°C{C_RESET}", telemetry.cpu_temp);
+    println!("  Fan Speed:     {C_BOLD}{}%{C_RESET}", telemetry.cpu_fan_speed);
     println!();
 
     // GPU Telemetry
-    let gpu_temp_color = if gpu_temp > 70 { C_RED } else if gpu_temp > 55 { C_YELLOW } else { C_GREEN };
-    println!("{C_BOLD}► GPU (NVIDIA GTX 1050 Ti Max-Q):{C_RESET}");
-    println!("  Power State:   {gpu_color}{gpu_state}{C_RESET}");
-    println!("  Temperature:   {gpu_temp_color}{gpu_temp}°C{C_RESET}");
-    println!("  Fan Speed:     {C_BOLD}{gpu_fan}%{C_RESET}");
+    let gpu_color = if telemetry.gpu_pstate == "P8" { C_GREEN } else if telemetry.gpu_active { C_YELLOW } else { C_DIM };
+    let gpu_temp_color = if telemetry.gpu_temp > 70 { C_RED } else if telemetry.gpu_temp > 55 { C_YELLOW } else { C_GREEN };
+    println!("{C_BOLD}► GPU (PCI: {}):{C_RESET}", hw.get_gpu_pci_path().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).unwrap_or_else(|| "N/A".into()));
+    println!("  Power State:   {gpu_color}{}{C_RESET}", telemetry.gpu_pstate);
+    println!("  Temperature:   {gpu_temp_color}{}°C{C_RESET}", telemetry.gpu_temp);
+    println!("  Fan Speed:     {C_BOLD}{}%{C_RESET}", telemetry.gpu_fan_speed);
     println!();
 
     // Battery Box
     println!("{C_BOLD}► Battery & Power:{C_RESET}");
-    println!("  Charge:        {C_BOLD}{bat_cap}%{C_RESET} ({bat_stat})");
-    println!("  Health Cap:    {C_CYAN}{bat_thresh}% limit{C_RESET} (Hardware threshold)");
+    println!("  Charge:        {C_BOLD}{}%{C_RESET} ({})", telemetry.battery_capacity, telemetry.battery_status);
+    println!("  Health Cap:    {C_CYAN}{}% limit{C_RESET} (Hardware threshold)", telemetry.battery_threshold);
     println!();
 }
 
-fn set_cpu_tuning(no_turbo: bool, epp: &str) {
-    let _ = write_sysfs("/sys/devices/system/cpu/intel_pstate/no_turbo", if no_turbo { "1" } else { "0" });
-    if let Ok(entries) = fs::read_dir("/sys/devices/system/cpu") {
-        for entry in entries.flatten() {
-            let path = entry.path().join("cpufreq/energy_performance_preference");
-            if path.exists() {
-                if let Some(p_str) = path.to_str() {
-                    let _ = write_sysfs(p_str, epp);
-                }
-            }
-        }
-    }
-}
-
-fn set_mode(mode: &str) {
-    match mode.to_lowercase().as_str() {
-        "silent" | "quiet" | "eco" => {
-            let _ = write_sysfs(&format!("{MSI_EC_PATH}/cooler_boost"), "off");
-            let _ = write_sysfs(&format!("{MSI_EC_PATH}/fan_mode"), "silent");
-            let _ = write_sysfs(&format!("{MSI_EC_PATH}/shift_mode"), "eco");
-            set_cpu_tuning(true, "power");
-            println!("{C_GREEN}✓ Switched to SILENT mode (Eco profile, quiet fan curves, Turbo Boost disabled, EPP power).{C_RESET}");
-            notify_osd("MSI Profile: Silent", "Eco profile + Quiet fans + Max battery life", "weather-clear-night");
-        }
-        "balanced" | "comfort" | "auto" => {
-            let _ = write_sysfs(&format!("{MSI_EC_PATH}/cooler_boost"), "off");
-            let _ = write_sysfs(&format!("{MSI_EC_PATH}/fan_mode"), "auto");
-            let _ = write_sysfs(&format!("{MSI_EC_PATH}/shift_mode"), "comfort");
-            set_cpu_tuning(false, "balance_power");
-            println!("{C_BLUE}✓ Switched to BALANCED mode (Comfort profile, auto fan control, dynamic clocks).{C_RESET}");
-            notify_osd("MSI Profile: Balanced", "Comfort profile + Dynamic fan control", "preferences-system");
-        }
-        "turbo" | "performance" | "max" => {
-            let _ = write_sysfs(&format!("{MSI_EC_PATH}/cooler_boost"), "off");
-            let _ = write_sysfs(&format!("{MSI_EC_PATH}/fan_mode"), "advanced");
-            let _ = write_sysfs(&format!("{MSI_EC_PATH}/shift_mode"), "turbo");
-            set_cpu_tuning(false, "performance");
-            println!("{C_MAGENTA}✓ Switched to TURBO mode (Turbo profile, maximum sustained clocks, EPP performance).{C_RESET}");
-            notify_osd("MSI Profile: Turbo", "Maximum performance profile activated", "system-run");
-        }
-        other => {
-            eprintln!("{C_RED}Error: Unknown mode '{other}'. Choose: silent | balanced | turbo{C_RESET}");
-        }
-    }
-}
-
-fn cycle_mode() {
-    let fan_mode = read_sysfs(&format!("{MSI_EC_PATH}/fan_mode")).unwrap_or_default();
-    let shift_mode = read_sysfs(&format!("{MSI_EC_PATH}/shift_mode")).unwrap_or_default();
-
-    if fan_mode == "silent" || shift_mode == "eco" {
-        set_mode("balanced");
-    } else if shift_mode == "comfort" || fan_mode == "auto" {
-        set_mode("turbo");
-    } else {
-        set_mode("silent");
-    }
-}
-
-fn set_boost(action: Option<String>) {
-    let current = read_sysfs(&format!("{MSI_EC_PATH}/cooler_boost")).unwrap_or_else(|| "off".into());
-    let target = match action.as_deref() {
-        Some("on") | Some("enable") => "on",
-        Some("off") | Some("disable") => "off",
-        _ => if current == "on" { "off" } else { "on" },
-    };
-
-    if let Err(e) = write_sysfs(&format!("{MSI_EC_PATH}/cooler_boost"), target) {
-        eprintln!("{C_RED}Error: {e}{C_RESET}");
-        return;
-    }
-
-    if target == "on" {
-        println!("{C_RED}❄️ Cooler Boost ENABLED (fans forced to 100% RPM).{C_RESET}");
-        notify_osd("Cooler Boost: ON", "Dual fans forced to 100% maximum RPM", "weather-snow");
-    } else {
-        println!("{C_GREEN}❄️ Cooler Boost DISABLED (restored to profile curve).{C_RESET}");
-        notify_osd("Cooler Boost: OFF", "Fans restored to profile curve", "weather-clear");
-    }
-}
-
-fn set_gpu_power() {
-    let (state, color) = get_gpu_status();
-    println!("{C_BOLD}► NVIDIA GPU Architecture & Power Status:{C_RESET}");
-    println!("  Hardware:      NVIDIA GeForce GTX 1050 Ti Max-Q (Pascal GP107M)");
-    println!("  Power State:   {color}{state}{C_RESET}");
-
-    // Check if nvidia-smi can query current performance state and processes
-    if let Ok(output) = Command::new("nvidia-smi")
-        .args(["--query-gpu=pstate,temperature.gpu,memory.used,power.draw", "--format=csv,noheader,nounits"])
-        .output()
-    {
-        if let Ok(s) = String::from_utf8(output.stdout) {
-            let parts: Vec<&str> = s.trim().split(',').map(|p| p.trim()).collect();
-            if parts.len() >= 4 {
-                println!("  P-State:       {C_GREEN}{}{C_RESET} (P8 = Lowest Idle Power State)", parts[0]);
-                println!("  Temperature:   {}°C", parts[1]);
-                println!("  VRAM Usage:    {} MiB (Idle)", parts[2]);
-            }
-        }
-    }
-
-    println!();
-    println!("{C_DIM}ℹ️  Architecture Note:{C_RESET}");
-    println!("{C_DIM}   Pascal GPUs officially use Coarse-Grained Dynamic Power Management (P8).{C_RESET}");
-    println!("{C_DIM}   In P8 state, the GPU clock drops to minimum, drawing negligible power.{C_RESET}");
-    println!("{C_DIM}   System suspend preservation is enabled (NVreg_PreserveVideoMemoryAllocations=1).{C_RESET}");
-}
-
-fn set_battery(thresh: Option<u8>) {
-    let path = format!("{BAT_PATH}/charge_control_end_threshold");
-    if let Some(t) = thresh {
-        if !(50..=100).contains(&t) {
-            eprintln!("{C_RED}Error: Threshold must be between 50% and 100%{C_RESET}");
+fn set_mode_cmd(hw: &HardwareController, mode_str: &str) {
+    if let Some(mode) = ProfileMode::from_str_loose(mode_str) {
+        if let Err(e) = hw.set_mode(mode.clone()) {
+            eprintln!("{C_RED}Error applying profile: {e}{C_RESET}");
             return;
         }
-        if let Err(e) = write_sysfs(&path, &t.to_string()) {
+
+        match mode {
+            ProfileMode::Silent => {
+                println!("{C_GREEN}✓ Switched to SILENT mode (Eco profile, quiet fan curves, Turbo Boost disabled, EPP power).{C_RESET}");
+                notify_osd("MSI Profile: Silent", "Eco profile + Quiet fans + Max battery life", "weather-clear-night");
+            }
+            ProfileMode::Balanced => {
+                println!("{C_BLUE}✓ Switched to BALANCED mode (Comfort profile, auto fan control, dynamic clocks).{C_RESET}");
+                notify_osd("MSI Profile: Balanced", "Comfort profile + Dynamic fan control", "preferences-system");
+            }
+            ProfileMode::Turbo => {
+                println!("{C_MAGENTA}✓ Switched to TURBO mode (Turbo profile, maximum sustained clocks, EPP performance).{C_RESET}");
+                notify_osd("MSI Profile: Turbo", "Maximum performance profile activated", "system-run");
+            }
+        }
+    } else {
+        eprintln!("{C_RED}Error: Unknown mode '{mode_str}'. Choose: silent | balanced | turbo{C_RESET}");
+    }
+}
+
+fn cycle_mode_cmd(hw: &HardwareController) {
+    match hw.cycle_mode() {
+        Ok(mode) => match mode {
+            ProfileMode::Silent => {
+                println!("{C_GREEN}✓ Switched to SILENT mode{C_RESET}");
+                notify_osd("MSI Profile: Silent", "Eco profile + Quiet fans", "weather-clear-night");
+            }
+            ProfileMode::Balanced => {
+                println!("{C_BLUE}✓ Switched to BALANCED mode{C_RESET}");
+                notify_osd("MSI Profile: Balanced", "Comfort profile + Dynamic fans", "preferences-system");
+            }
+            ProfileMode::Turbo => {
+                println!("{C_MAGENTA}✓ Switched to TURBO mode{C_RESET}");
+                notify_osd("MSI Profile: Turbo", "Maximum performance profile", "system-run");
+            }
+        },
+        Err(e) => eprintln!("{C_RED}Error cycling mode: {e}{C_RESET}"),
+    }
+}
+
+fn set_boost_cmd(hw: &HardwareController, action: Option<String>) {
+    let result = match action.as_deref() {
+        Some("on") | Some("enable") => hw.set_cooler_boost(true).map(|_| true),
+        Some("off") | Some("disable") => hw.set_cooler_boost(false).map(|_| false),
+        _ => hw.toggle_cooler_boost(),
+    };
+
+    match result {
+        Ok(true) => {
+            println!("{C_RED}❄️ Cooler Boost ENABLED (fans forced to 100% RPM).{C_RESET}");
+            notify_osd("Cooler Boost: ON", "Dual fans forced to 100% maximum RPM", "weather-snow");
+        }
+        Ok(false) => {
+            println!("{C_GREEN}❄️ Cooler Boost DISABLED (restored to profile curve).{C_RESET}");
+            notify_osd("Cooler Boost: OFF", "Fans restored to profile curve", "weather-clear");
+        }
+        Err(e) => eprintln!("{C_RED}Error: {e}{C_RESET}"),
+    }
+}
+
+fn set_battery_cmd(hw: &HardwareController, thresh: Option<u8>) {
+    if let Some(t) = thresh {
+        if let Err(e) = hw.set_battery_threshold(t) {
             eprintln!("{C_RED}Error setting threshold: {e}{C_RESET}");
         } else {
             println!("{C_GREEN}✓ Battery charge limit set to {t}%.{C_RESET}");
             notify_osd("Battery Threshold", &format!("Charge limit set to {t}%"), "battery");
         }
-    } else {
-        let current = read_sysfs(&path).unwrap_or_else(|| "100".into());
+    } else if let Some(current) = hw.get_battery_threshold() {
         println!("{C_BOLD}Current Battery Charge Limit:{C_RESET} {C_CYAN}{current}%{C_RESET}");
+    } else {
+        eprintln!("{C_RED}Battery charge limit is not supported or battery not found.{C_RESET}");
     }
 }
 
-fn set_cam(action: Option<String>) {
-    let current = read_sysfs(&format!("{MSI_EC_PATH}/webcam_block")).unwrap_or_else(|| "off".into());
-    let target = match action.as_deref() {
-        Some("block") | Some("off") => "on",
-        Some("unblock") | Some("on") => "off",
-        _ => if current == "on" { "off" } else { "on" },
+fn set_cam_cmd(hw: &HardwareController, action: Option<String>) {
+    let result = match action.as_deref() {
+        Some("block") | Some("off") => hw.set_webcam_block(true).map(|_| true),
+        Some("unblock") | Some("on") => hw.set_webcam_block(false).map(|_| false),
+        _ => hw.toggle_webcam(),
     };
 
-    if let Err(e) = write_sysfs(&format!("{MSI_EC_PATH}/webcam_block"), target) {
-        eprintln!("{C_RED}Error: {e}{C_RESET}");
-        return;
-    }
-
-    if target == "on" {
-        println!("{C_RED}📷 Webcam BLOCKED in hardware via EC.{C_RESET}");
-        notify_osd("Webcam: Blocked", "Camera hardware-isolated by EC", "camera-disabled");
-    } else {
-        println!("{C_GREEN}📷 Webcam ENABLED.{C_RESET}");
-        notify_osd("Webcam: Active", "Camera hardware enabled", "camera-photo");
+    match result {
+        Ok(true) => {
+            println!("{C_RED}📷 Webcam BLOCKED in hardware via EC.{C_RESET}");
+            notify_osd("Webcam: Blocked", "Camera hardware-isolated by EC", "camera-disabled");
+        }
+        Ok(false) => {
+            println!("{C_GREEN}📷 Webcam ENABLED.{C_RESET}");
+            notify_osd("Webcam: Active", "Camera hardware enabled", "camera-photo");
+        }
+        Err(e) => eprintln!("{C_RED}Error: {e}{C_RESET}"),
     }
 }
 
-fn run_watch() {
+fn run_watch(hw: &HardwareController) {
     print!("\x1b[2J"); // Clear screen
     loop {
         print!("\x1b[H"); // Cursor to home
-        show_status();
+        let telemetry = hw.collect_telemetry();
+        print_status(&telemetry, hw);
         println!("{C_DIM}Refreshing every 1s. Press Ctrl+C to exit.{C_RESET}");
         sleep(Duration::from_secs(1));
     }
@@ -341,15 +234,30 @@ fn run_watch() {
 
 fn main() {
     let cli = Cli::parse();
+    let hw = HardwareController::new();
 
     match cli.command {
-        None | Some(Commands::Status) => show_status(),
-        Some(Commands::Mode { mode }) => set_mode(&mode),
-        Some(Commands::Cycle) => cycle_mode(),
-        Some(Commands::Boost { action }) => set_boost(action),
-        Some(Commands::Gpu) => set_gpu_power(),
-        Some(Commands::Battery { threshold }) => set_battery(threshold),
-        Some(Commands::Cam { action }) => set_cam(action),
-        Some(Commands::Watch) => run_watch(),
+        None | Some(Commands::Status) => {
+            let telemetry = hw.collect_telemetry();
+            print_status(&telemetry, &hw);
+        }
+        Some(Commands::Mode { mode }) => set_mode_cmd(&hw, &mode),
+        Some(Commands::Cycle) => cycle_mode_cmd(&hw),
+        Some(Commands::Boost { action }) => set_boost_cmd(&hw, action),
+        Some(Commands::Gpu) => {
+            let telemetry = hw.collect_telemetry();
+            let color = if telemetry.gpu_pstate == "P8" { C_GREEN } else { C_YELLOW };
+            println!("{C_BOLD}► NVIDIA GPU Architecture & Power Status:{C_RESET}");
+            println!("  PCI Address:   {}", hw.get_gpu_pci_path().map(|p| p.display().to_string()).unwrap_or_else(|| "Not found".into()));
+            println!("  Power State:   {color}{}{C_RESET}", telemetry.gpu_pstate);
+            println!("  Temperature:   {}°C", telemetry.gpu_temp);
+            println!("  Fan Speed:     {}%", telemetry.gpu_fan_speed);
+        }
+        Some(Commands::Battery { threshold }) => set_battery_cmd(&hw, threshold),
+        Some(Commands::Cam { action }) => set_cam_cmd(&hw, action),
+        Some(Commands::Watch) => run_watch(&hw),
+        Some(Commands::Gui) => {
+            eprintln!("Launching GUI is handled via msictl-gui binary or build feature");
+        }
     }
 }
