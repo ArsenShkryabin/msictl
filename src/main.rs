@@ -257,7 +257,14 @@ fn main() {
         Some(Commands::Cam { action }) => set_cam_cmd(&hw, action),
         Some(Commands::Watch) => run_watch(&hw),
         Some(Commands::Gui) => {
-            eprintln!("Launching GUI is handled via msictl-gui binary or build feature");
+            #[cfg(feature = "gui")]
+            {
+                let _ = Command::new("msictl-gui").spawn();
+            }
+            #[cfg(not(feature = "gui"))]
+            {
+                eprintln!("{C_RED}Error: msictl was built without GUI support.{C_RESET}");
+            }
         }
     }
 }

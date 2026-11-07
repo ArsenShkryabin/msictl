@@ -14,16 +14,19 @@ Designed and tested on **MSI PS63 Modern 8RD (MS-16S1)** and compatible MSI lapt
 - 🔍 **Dynamic Hardware Auto-Discovery:** Automatically detects NVIDIA GPU PCI address (via vendor ID `0x10de` and VGA/3D class) and primary ACPI battery (BAT0, BAT1, etc.) without hardcoding bus paths.
 - 🔋 **Safe GPU Power Tracking:** Tracks NVIDIA discrete GPU performance state (`P8` low power idle) without unstable bus hacks.
 - 🖥️ **Desktop OSD & Hyprland Hotkeys:** Instant desktop notifications via `notify-send` on mode switch.
+- 🪟 **Modern Slint GUI + System Tray:** Native Wayland/X11 GUI with live telemetry dashboard, battery threshold switcher, Cooler Boost toggle, and background System Tray indicator (StatusNotifierItem/AppIndicator).
 - ⚡ **Zero-Sudo Udev Integration:** Direct sysfs access for group `wheel` without entering root passwords.
 
 ---
 
 ## 🚀 Installation
 
-### 1. Build & Install Binary
+### 1. Build & Install Binaries
 ```bash
 cargo build --release
 sudo install -m 755 target/release/msictl /usr/local/bin/msictl
+sudo install -m 755 target/release/msictl-gui /usr/local/bin/msictl-gui
+sudo install -m 644 assets/msictl.desktop /usr/share/applications/msictl.desktop
 ```
 
 ### 2. Configure Udev (Run without sudo)
@@ -33,6 +36,22 @@ sudo cp assets/70-msi-ec.rules /etc/udev/rules.d/70-msi-ec.rules
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 Ensure your user belongs to the `wheel` group.
+
+---
+
+## 🎨 GUI & Tray Usage
+
+Launch the GUI dashboard and background tray:
+```bash
+msictl-gui
+```
+- **Tray Icon**: Displays current profile icon in the system panel (Waybar, Quickshell, KDE, GNOME).
+- **Left-Click Tray**: Toggles the Control Center dashboard window.
+- **Right-Click Tray Menu**: Quick switcher between Silent / Balanced / Turbo, Cooler Boost toggle, Webcam killswitch, and Show/Quit.
+
+---
+
+## ⌨️ CLI Usage
 
 ---
 

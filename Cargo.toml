@@ -7,3 +7,22 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+slint = { version = "1.9", optional = true }
+ksni = { version = "0.3", default-features = false, features = ["async-io"], optional = true }
+
+[build-dependencies]
+slint-build = { version = "1.9", optional = true }
+
+[features]
+default = ["gui"]
+gui = ["dep:slint", "dep:slint-build", "dep:ksni"]
+
+[[bin]]
+name = "msictl"
+path = "src/main.rs"
+
+[[bin]]
+name = "msictl-gui"
+path = "src/gui_main.rs"
+required-features = ["gui"]
+

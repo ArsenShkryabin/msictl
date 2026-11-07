@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=MSI Control Center
+Comment=Hardware and fan control utility for MSI laptops
+Exec=msictl-gui
+Icon=preferences-system
+Terminal=false
+Type=Application
+Categories=Settings;HardwareSettings;System;
+StartupNotify=true
+StartupWMClass=msictl-gui

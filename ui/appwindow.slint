@@ -1,0 +1,437 @@
+import { Button, Slider, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "MSI Control Center";
+    min-width: 440px;
+    min-height: 580px;
+    default-font-family: "sans-serif";
+    background: #14171d;
+
+    in-out property <string> cpu_temp: "--°C";
+    in-out property <string> cpu_fan: "--%";
+    in-out property <string> gpu_temp: "--°C";
+    in-out property <string> gpu_fan: "--%";
+    in-out property <string> gpu_state: "Offline";
+    in-out property <string> active_mode: "balanced";
+    in-out property <bool> cooler_boost: false;
+    in-out property <bool> webcam_blocked: false;
+    in-out property <string> battery_status: "--%";
+    in-out property <int> battery_threshold: 80;
+
+    callback mode_selected(string);
+    callback cooler_boost_toggled();
+    callback webcam_toggled();
+    callback battery_threshold_changed(int);
+    callback hide_window();
+
+    VerticalBox {
+        padding: 18px;
+        spacing: 14px;
+
+        // Header
+        HorizontalBox {
+            padding: 0px;
+            alignment: space-between;
+
+            VerticalLayout {
+                Text {
+                    text: "MSI Control";
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: #ffffff;
+                }
+                Text {
+                    text: "Hardware & Thermal Manager";
+                    font-size: 12px;
+                    color: #8b949e;
+                }
+            }
+
+            // Quick minimize/hide to tray button
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 6px;
+                background: area-hide.has-hover ? #2a303c : #1e232d;
+                border-width: 1px;
+                border-color: #30363d;
+
+                Text {
+                    text: "✕";
+                    font-size: 14px;
+                    color: #c9d1d9;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                area-hide := TouchArea {
+                    clicked => {
+                        root.hide_window();
+                    }
+                }
+            }
+        }
+
+        // Telemetry Grid
+        HorizontalBox {
+            spacing: 12px;
+            padding: 0px;
+
+            // CPU Card
+            Rectangle {
+                background: #1c2128;
+                border-radius: 10px;
+                border-width: 1px;
+                border-color: #30363d;
+                min-width: 190px;
+                height: 100px;
+
+                VerticalBox {
+                    padding: 12px;
+                    spacing: 4px;
+
+                    HorizontalBox {
+                        padding: 0px;
+                        Text {
+                            text: "CPU Core";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #58a6ff;
+                        }
+                    }
+
+                    Text {
+                        text: root.cpu_temp;
+                        font-size: 22px;
+                        font-weight: 700;
+                        color: #ffffff;
+                    }
+
+                    Text {
+                        text: "Fan: " + root.cpu_fan;
+                        font-size: 12px;
+                        color: #8b949e;
+                    }
+                }
+            }
+
+            // GPU Card
+            Rectangle {
+                background: #1c2128;
+                border-radius: 10px;
+                border-width: 1px;
+                border-color: #30363d;
+                min-width: 190px;
+                height: 100px;
+
+                VerticalBox {
+                    padding: 12px;
+                    spacing: 4px;
+
+                    HorizontalBox {
+                        padding: 0px;
+                        Text {
+                            text: "GPU (NVIDIA)";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #7ee787;
+                        }
+                    }
+
+                    Text {
+                        text: root.gpu_temp;
+                        font-size: 22px;
+                        font-weight: 700;
+                        color: #ffffff;
+                    }
+
+                    Text {
+                        text: "Fan: " + root.gpu_fan + " (" + root.gpu_state + ")";
+                        font-size: 12px;
+                        color: #8b949e;
+                    }
+                }
+            }
+        }
+
+        // Performance Mode Selector
+        Rectangle {
+            background: #1c2128;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: #30363d;
+            height: 95px;
+
+            VerticalBox {
+                padding: 12px;
+                spacing: 8px;
+
+                Text {
+                    text: "Performance Profile";
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #c9d1d9;
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+                    padding: 0px;
+
+                    // Silent
+                    Rectangle {
+                        border-radius: 6px;
+                        background: root.active_mode == "silent" ? #238636 : (btn-s.has-hover ? #282f38 : #21262d);
+                        border-width: 1px;
+                        border-color: root.active_mode == "silent" ? #3fb950 : #30363d;
+
+                        Text {
+                            text: "🤫 Silent";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #ffffff;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        btn-s := TouchArea {
+                            clicked => { root.mode_selected("silent"); }
+                        }
+                    }
+
+                    // Balanced
+                    Rectangle {
+                        border-radius: 6px;
+                        background: root.active_mode == "balanced" ? #1f6feb : (btn-b.has-hover ? #282f38 : #21262d);
+                        border-width: 1px;
+                        border-color: root.active_mode == "balanced" ? #58a6ff : #30363d;
+
+                        Text {
+                            text: "⚖️ Balanced";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #ffffff;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        btn-b := TouchArea {
+                            clicked => { root.mode_selected("balanced"); }
+                        }
+                    }
+
+                    // Turbo
+                    Rectangle {
+                        border-radius: 6px;
+                        background: root.active_mode == "turbo" ? #8957e5 : (btn-t.has-hover ? #282f38 : #21262d);
+                        border-width: 1px;
+                        border-color: root.active_mode == "turbo" ? #bc8cff : #30363d;
+
+                        Text {
+                            text: "🚀 Turbo";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #ffffff;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        btn-t := TouchArea {
+                            clicked => { root.mode_selected("turbo"); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cooler Boost Action Card
+        Rectangle {
+            background: #1c2128;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: root.cooler_boost ? #f85149 : #30363d;
+            height: 70px;
+
+            HorizontalBox {
+                padding: 12px;
+                alignment: space-between;
+
+                VerticalLayout {
+                    spacing: 2px;
+                    Text {
+                        text: "Cooler Boost";
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: root.cooler_boost ? #ff7b72 : #ffffff;
+                    }
+                    Text {
+                        text: "Force dual cooling fans to 100% RPM";
+                        font-size: 12px;
+                        color: #8b949e;
+                    }
+                }
+
+                Rectangle {
+                    width: 90px;
+                    height: 36px;
+                    border-radius: 6px;
+                    background: root.cooler_boost ? #da3633 : (boost-btn.has-hover ? #30363d : #21262d);
+                    border-width: 1px;
+                    border-color: root.cooler_boost ? #f85149 : #30363d;
+
+                    Text {
+                        text: root.cooler_boost ? "ACTIVE" : "TURN ON";
+                        font-size: 12px;
+                        font-weight: 700;
+                        color: #ffffff;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    boost-btn := TouchArea {
+                        clicked => {
+                            root.cooler_boost_toggled();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Battery Care & Threshold
+        Rectangle {
+            background: #1c2128;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: #30363d;
+            height: 105px;
+
+            VerticalBox {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalBox {
+                    padding: 0px;
+                    alignment: space-between;
+
+                    Text {
+                        text: "Battery Health Limit";
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: #c9d1d9;
+                    }
+
+                    Text {
+                        text: "Current: " + root.battery_status;
+                        font-size: 12px;
+                        color: #8b949e;
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+                    padding: 0px;
+
+                    // 60%
+                    Rectangle {
+                        border-radius: 6px;
+                        background: root.battery_threshold == 60 ? #1f6feb : (b60.has-hover ? #282f38 : #21262d);
+                        border-width: 1px;
+                        border-color: root.battery_threshold == 60 ? #58a6ff : #30363d;
+
+                        Text {
+                            text: "60% (Max Lifespan)";
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: #ffffff;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        b60 := TouchArea {
+                            clicked => { root.battery_threshold_changed(60); }
+                        }
+                    }
+
+                    // 80%
+                    Rectangle {
+                        border-radius: 6px;
+                        background: root.battery_threshold == 80 ? #1f6feb : (b80.has-hover ? #282f38 : #21262d);
+                        border-width: 1px;
+                        border-color: root.battery_threshold == 80 ? #58a6ff : #30363d;
+
+                        Text {
+                            text: "80% (Balanced)";
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: #ffffff;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        b80 := TouchArea {
+                            clicked => { root.battery_threshold_changed(80); }
+                        }
+                    }
+
+                    // 100%
+                    Rectangle {
+                        border-radius: 6px;
+                        background: root.battery_threshold == 100 ? #1f6feb : (b100.has-hover ? #282f38 : #21262d);
+                        border-width: 1px;
+                        border-color: root.battery_threshold == 100 ? #58a6ff : #30363d;
+
+                        Text {
+                            text: "100% (Travel)";
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: #ffffff;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        b100 := TouchArea {
+                            clicked => { root.battery_threshold_changed(100); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Hardware Privacy / Webcam
+        Rectangle {
+            background: #1c2128;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: #30363d;
+            height: 60px;
+
+            HorizontalBox {
+                padding: 12px;
+                alignment: space-between;
+
+                Text {
+                    text: "📷 Hardware Webcam Killswitch";
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #c9d1d9;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    width: 90px;
+                    height: 32px;
+                    border-radius: 6px;
+                    background: root.webcam_blocked ? #da3633 : #238636;
+
+                    Text {
+                        text: root.webcam_blocked ? "BLOCKED" : "ACTIVE";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #ffffff;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    cam-btn := TouchArea {
+                        clicked => {
+                            root.webcam_toggled();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
