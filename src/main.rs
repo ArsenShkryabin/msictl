@@ -60,6 +60,11 @@ enum Commands {
 }
 
 fn notify_osd(title: &str, body: &str, icon: &str) {
+    // Only send notification if graphical display/wayland session is available
+    if std::env::var("WAYLAND_DISPLAY").is_err() && std::env::var("DISPLAY").is_err() {
+        return;
+    }
+
     let _ = Command::new("notify-send")
         .args([
             "-a", "MSI Control",
@@ -129,8 +134,8 @@ fn set_mode_cmd(hw: &HardwareController, mode_str: &str) {
 
         match mode {
             ProfileMode::Silent => {
-                println!("{C_GREEN}✓ Switched to SILENT mode (Eco profile, quiet fan curves, Turbo Boost disabled, EPP power).{C_RESET}");
-                notify_osd("MSI Profile: Silent", "Eco profile + Quiet fans + Max battery life", "weather-clear-night");
+                println!("{C_GREEN}✓ Switched to SILENT mode (Eco profile, quiet fan curves, Turbo Boost disabled, EPP balance_power).{C_RESET}");
+                notify_osd("MSI Profile: Silent", "Eco profile + Quiet fans + Smooth animations (balance_power)", "weather-clear-night");
             }
             ProfileMode::Balanced => {
                 println!("{C_BLUE}✓ Switched to BALANCED mode (Comfort profile, auto fan control, dynamic clocks).{C_RESET}");

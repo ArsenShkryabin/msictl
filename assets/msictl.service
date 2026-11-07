@@ -1,0 +1,11 @@
+[Unit]
+Description=MSI Laptop Hardware Controller & Power Management (Default Silent Profile)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/msictl mode silent
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

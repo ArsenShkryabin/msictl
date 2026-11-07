@@ -236,7 +236,8 @@ impl HardwareController {
                 Self::write_sysfs(&ec.join("cooler_boost"), "off")?;
                 Self::write_sysfs(&ec.join("fan_mode"), "silent")?;
                 Self::write_sysfs(&ec.join("shift_mode"), "eco")?;
-                Self::set_cpu_tuning(true, "power");
+                // Use balance_power instead of power to avoid 800MHz throttling and GUI stutters
+                Self::set_cpu_tuning(true, "balance_power");
             }
             ProfileMode::Balanced => {
                 Self::write_sysfs(&ec.join("cooler_boost"), "off")?;

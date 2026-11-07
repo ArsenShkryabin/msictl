@@ -190,6 +190,9 @@ fn main() -> Result<(), slint::PlatformError> {
     let hw = Arc::new(HardwareController::new());
     let is_window_visible = Arc::new(AtomicBool::new(true));
 
+    // Ensure Silent (Quiet & Smooth) profile is applied on start
+    let _ = hw.set_mode(ProfileMode::Silent);
+
     // Initial Telemetry Sync
     sync_telemetry_to_ui(&main_window, &hw);
 
